@@ -1,0 +1,24 @@
+[package]
+name = "mongo-memory-server"
+description = "Spinning up mongod in memory for Rust unit tests."
+authors = ["Benjamin Kuen <kuen@devstorage.eu>"]
+license = "MIT"
+repository = "https://github.com/bkuen/mongo-memory-server-rs.git"
+keywords = [ "mongodb", "tests", "in-memory" ]
+categories = ["development-tools::testing"]
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+indicatif = "0.17.0-rc.6"
+futures-util = "0.3.21"
+os_info = { version = "3.2.0", features = ["serde"] }
+reqwest = { version = "0.11.9", features = ["stream"] }
+semver = "1.0.6"
+serde = "1.0.136"
+serde_json = "1.0.79"
+tempfile = "3.3.0"
+thiserror = "1.0.30"
+tokio = { version = "1.17.0", features = ["full"] }
