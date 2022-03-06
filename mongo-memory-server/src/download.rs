@@ -1,13 +1,16 @@
 use crate::error::MemoryServerError;
 
 use std::cmp::min;
+use std::{fs, io, path};
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use futures_util::StreamExt;
 use os_info::{Bitness, Info as OsInfo, Type as OsType};
+use piz::ZipArchive;
+use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use semver::{Version, VersionReq};
 
 const BINARY_URL: &str = "https://fastdl.mongodb.org";
@@ -117,6 +120,65 @@ impl BinaryDownload {
         }
     }
 
+    /// Extracts a zip compressed `MongoDB` (Windows) binary located at the given path
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to the compressed binary
+    pub fn extract_zip<P: AsRef<Path>>(&self, path: P) -> Result<(), MemoryServerError> {
+        let path_str = path.as_ref().to_str().unwrap();
+
+        // The name of the binary will be our base directory name
+        let parent_dir = path.as_ref().with_extension("");
+
+        let mut zip_file = File::open(&path)?;
+        let mut zip_buf = Vec::with_capacity(zip_file.metadata().unwrap().len() as usize);
+        zip_file.read_to_end(&mut zip_buf)?;
+
+        let archive = ZipArchive::new(&zip_buf)?;
+
+        println!("Extracting {}...", path_str);
+
+        // Initialize progress bar
+        let mp = MultiProgress::new();
+
+        let extract_result: Result<(), io::Error> = archive.entries()
+            .par_iter()
+            .try_for_each(|entry| {
+                // We extract each file directly in our new directory so we can skip the first directory
+                let entry_path: path::PathBuf = entry.path.iter().skip(1)
+                    .collect();
+
+                if let Some(parent) = entry_path.parent() {
+                    // Create parent directories as needed.
+                    fs::create_dir_all(parent_dir.join(parent))?;
+                }
+
+                let reader = archive.read(entry).unwrap();
+
+                // Initialize progress_bar
+                let total_size = entry.size;
+                let pb = ProgressBar::new(total_size as u64);
+                pb.set_style(ProgressStyle::default_bar()
+                    .template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})").unwrap()
+                    .progress_chars("#>-"));
+
+                mp.add(pb.clone());
+
+                let mut save_to = File::create(parent_dir.join(&entry_path))?;
+                let mut reader = pb.wrap_read(reader);
+                io::copy(&mut reader, &mut save_to)?;
+
+                Ok(())
+            });
+
+        extract_result?;
+
+        println!("Extracted {}...", path_str);
+
+        Ok(())
+    }
+
     /// Returns the download_url
     pub fn download_url(&self) -> Result<String, MemoryServerError> {
         self.binary.download_url()
@@ -177,11 +239,17 @@ impl BinaryDownload {
 
 #[cfg(test)]
 mod tests {
+    use crate::BinaryDownload;
     use crate::download::{MongoBinary};
+
+    use std::fs::File;
+    use std::io::Write;
 
     use os_info::{Bitness, Type as OsType, Version as OsVersion};
     use semver::Version;
     use serde::Serialize;
+    use tempfile::TempDir;
+    use zip::CompressionMethod;
 
     #[derive(Serialize)]
     struct OsInfo {
@@ -272,5 +340,28 @@ mod tests {
         let url = mongo_binary.download_url().unwrap();
 
         assert_eq!(url, "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-5.2.0.zip".to_string());
+    }
+
+    #[test]
+    fn test_binary_download_extract_zip() {
+        let mongo_version = Version::parse("5.2.0").unwrap();
+        let os_info = create_win_os();
+        let binary_download = BinaryDownload::new(os_info, mongo_version);
+
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("mongodb-windows-x86_64-5.2.0.zip");
+
+        let zip_file = File::create(&zip_path).unwrap();
+        let mut zip = zip::write::ZipWriter::new(zip_file);
+        let options = zip::write::FileOptions::default().compression_method(CompressionMethod::Deflated);
+
+        zip.start_file("data/test.txt", options).unwrap();
+        zip.write(b"Test").unwrap();
+        zip.finish().unwrap();
+
+        binary_download.extract_zip(&zip_path).unwrap();
+
+        let unzip_path = temp_dir.path().join("mongodb-windows-x86_64-5.2.0");
+        assert!(unzip_path.exists());
     }
 }

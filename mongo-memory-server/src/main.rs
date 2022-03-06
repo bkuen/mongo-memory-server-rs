@@ -20,7 +20,8 @@ async fn main() -> io::Result<()> {
 
     let os_info = os_info::get();
     let binary_download = BinaryDownload::new(os_info, mongo_version);
-    binary_download.download(path).await.unwrap();
+    binary_download.download(&path).await.unwrap();
+    binary_download.extract_zip(&path.join("mongodb-windows-x86_64-5.2.0.zip")).unwrap();
 
     Ok(())
 }

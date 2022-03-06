@@ -14,5 +14,7 @@ pub enum MemoryServerError {
     #[error("binary download failed: {0}")]
     ReqwestError(#[from] reqwest::Error),
     #[error("{0}")]
-    IoError(#[from] io::Error)
+    IoError(#[from] io::Error),
+    #[error("zip error occurred: {0}")]
+    ZipError(#[from] piz::result::ZipError),
 }
