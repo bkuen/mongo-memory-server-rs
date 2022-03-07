@@ -1,4 +1,4 @@
-use crate::download::BinaryDownload;
+use crate::download::{BinaryDownload, MongoBinary};
 
 use std::{fs, io};
 use std::path::Path;
@@ -19,9 +19,13 @@ async fn main() -> io::Result<()> {
     fs::create_dir_all(&path)?;
 
     let os_info = os_info::get();
-    let binary_download = BinaryDownload::new(os_info, mongo_version);
-    binary_download.download(&path).await.unwrap();
-    binary_download.extract_zip(&path.join("mongodb-windows-x86_64-5.2.0.zip")).unwrap();
+
+    let binary = MongoBinary::new(os_info.clone(), mongo_version.clone());
+    if !binary.is_present(&path).unwrap() {
+        let binary_download = BinaryDownload::new(os_info, mongo_version);
+        binary_download.download(&path).await.unwrap();
+        binary_download.extract_zip(&path.join("mongodb-windows-x86_64-5.2.0.zip")).unwrap();
+    }
 
     Ok(())
 }

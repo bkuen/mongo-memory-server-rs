@@ -35,6 +35,16 @@ impl MongoBinary {
         }
     }
 
+    /// Returns true if the binary is already present at the given path
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path
+    pub fn is_present<P: AsRef<Path>>(&self, path: P) -> Result<bool, MemoryServerError> {
+        let archive_name = self.archive_name()?;
+        Ok(path.as_ref().join(archive_name).exists())
+    }
+
     /// Returns the archive name
     pub fn archive_name(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
@@ -242,6 +252,7 @@ mod tests {
     use crate::BinaryDownload;
     use crate::download::{MongoBinary};
 
+    use std::fs;
     use std::fs::File;
     use std::io::Write;
 
@@ -363,5 +374,18 @@ mod tests {
 
         let unzip_path = temp_dir.path().join("mongodb-windows-x86_64-5.2.0");
         assert!(unzip_path.exists());
+    }
+
+    #[test]
+    fn test_binary_is_present() {
+        let os_info = create_win_os();
+        let mongo_version = Version::parse("5.2.0").unwrap();
+        let mongo_binary = MongoBinary::new(os_info, mongo_version);
+        let temp_dir = TempDir::new().unwrap();
+
+        assert!(!mongo_binary.is_present(&temp_dir).unwrap());
+
+        fs::create_dir_all(temp_dir.path().join("mongodb-windows-x86_64-5.2.0")).unwrap();
+        assert!(mongo_binary.is_present(&temp_dir).unwrap());
     }
 }
