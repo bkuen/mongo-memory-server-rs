@@ -17,6 +17,4 @@ pub enum MemoryServerError {
     Io(#[from] io::Error),
     #[error("zip error occurred: {0}")]
     Zip(#[from] piz::result::ZipError),
-    #[error("windows service error occurred: {0}")]
-    WinService(#[from] windows_service::Error),
 }

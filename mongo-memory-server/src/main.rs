@@ -1,11 +1,11 @@
 use crate::download::{BinaryDownload, MongoBinary};
+use crate::server::MongoServer;
 
 use std::{fs, io};
 use std::path::Path;
 use std::time::Duration;
 
 use semver::Version;
-use crate::server::MongoServer;
 
 pub mod download;
 pub mod error;
