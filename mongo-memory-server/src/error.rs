@@ -4,7 +4,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum MemoryServerError {
     #[error("unsupported os: {0}")]
-    UnsupportedOsError(String),
+    UnsupportedOs(String),
     #[error("unsupported os arch: {0}")]
     UnsupportedOsArch(String),
     #[error("invalid download url: {0}")]
@@ -12,9 +12,11 @@ pub enum MemoryServerError {
     #[error("error while downloading file")]
     DownloadFailed,
     #[error("binary download failed: {0}")]
-    ReqwestError(#[from] reqwest::Error),
+    Reqwest(#[from] reqwest::Error),
     #[error("{0}")]
-    IoError(#[from] io::Error),
+    Io(#[from] io::Error),
     #[error("zip error occurred: {0}")]
-    ZipError(#[from] piz::result::ZipError),
+    Zip(#[from] piz::result::ZipError),
+    #[error("windows service error occurred: {0}")]
+    WinService(#[from] windows_service::Error),
 }

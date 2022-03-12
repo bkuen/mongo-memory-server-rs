@@ -2,19 +2,20 @@ use crate::download::{BinaryDownload, MongoBinary};
 
 use std::{fs, io};
 use std::path::Path;
+use std::time::Duration;
 
 use semver::Version;
+use crate::server::MongoServer;
 
 pub mod download;
 pub mod error;
+pub mod server;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let cargo_home = std::env::var("CARGO_HOME").unwrap();
     let mongo_version = Version::parse("5.2.0").unwrap();
     let path = Path::new(&cargo_home).join("mongo-memory-server");
-
-    println!("Path: {:?}", &path.as_path());
 
     fs::create_dir_all(&path)?;
 
@@ -26,6 +27,12 @@ async fn main() -> io::Result<()> {
         binary_download.download(&path).await.unwrap();
         binary_download.extract_zip(&path.join("mongodb-windows-x86_64-5.2.0.zip")).unwrap();
     }
+
+    let working_dir = path.join("mongodb-windows-x86_64-5.2.0\\bin");
+    let mut server = MongoServer::new(&working_dir).unwrap();
+    server.start().unwrap();
+
+    std::thread::sleep(Duration::from_secs(60*60));
 
     Ok(())
 }

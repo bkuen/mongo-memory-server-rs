@@ -49,7 +49,7 @@ impl MongoBinary {
     pub fn archive_name(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
             OsType::Windows => self.win_archive_name(),
-            _ => Err(MemoryServerError::UnsupportedOsError(self.os_info.os_type().to_string()))
+            _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
     }
 
@@ -57,7 +57,7 @@ impl MongoBinary {
     pub fn archive_platform(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
             OsType::Windows => Ok("windows".to_string()),
-            _ => Err(MemoryServerError::UnsupportedOsError(self.os_info.os_type().to_string()))
+            _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
     }
 
@@ -65,7 +65,7 @@ impl MongoBinary {
     pub fn archive_file_ending(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
             OsType::Windows => Ok("zip".to_string()),
-            _ => Err(MemoryServerError::UnsupportedOsError(self.os_info.os_type().to_string()))
+            _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
     }
 
@@ -205,7 +205,7 @@ impl BinaryDownload {
 
         // Initialize download of `MongoDB` binaries
         let res = reqwest::get(download_url.clone()).await
-            .map_err(MemoryServerError::ReqwestError)?;
+            .map_err(MemoryServerError::Reqwest)?;
 
         let total_size = res.content_length()
             .ok_or_else(|| MemoryServerError::InvalidDownloadUrl(format!("content length missing for {}", download_url)))?;
