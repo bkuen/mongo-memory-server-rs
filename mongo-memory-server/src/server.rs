@@ -27,7 +27,6 @@ impl<'a> MongoServer<'a> {
     }
 
     /// Start the binary in the `Windows` background
-    #[cfg(windows)]
     pub fn start(&mut self) -> Result<(), MemoryServerError> {
         let data_dir = self.data_dir.as_ref();
 
