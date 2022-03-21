@@ -106,7 +106,7 @@ impl MongoBinary {
             name = format!("{}-2008plus-ssl", name);
         }
 
-        Ok(format!("{}-{}", name, self.mongo_version.to_string()))
+        Ok(format!("{}-{}", name, self.mongo_version))
     }
 }
 

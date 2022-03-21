@@ -30,7 +30,9 @@ async fn main() -> io::Result<()> {
 
     let working_dir = path.join("mongodb-windows-x86_64-5.2.0\\bin");
     let mut server = MongoServer::new(&working_dir).unwrap();
-    server.start().unwrap();
+    let _ = server.start().await.unwrap();
+
+    println!("Ready");
 
     std::thread::sleep(Duration::from_secs(60*60));
 
