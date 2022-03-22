@@ -1,7 +1,7 @@
 use crate::download::{BinaryDownload, MongoBinary};
-use crate::server::MongoServer;
+use crate::server::{MongoOptions, MongoServer};
 
-use std::{fs, io};
+use std::io;
 use std::path::Path;
 use std::time::Duration;
 
@@ -17,8 +17,6 @@ async fn main() -> io::Result<()> {
     let mongo_version = Version::parse("5.2.0").unwrap();
     let path = Path::new(&cargo_home).join("mongo-memory-server");
 
-    fs::create_dir_all(&path)?;
-
     let os_info = os_info::get();
 
     let binary = MongoBinary::new(os_info.clone(), mongo_version.clone());
@@ -29,7 +27,7 @@ async fn main() -> io::Result<()> {
     }
 
     let working_dir = path.join("mongodb-windows-x86_64-5.2.0\\bin");
-    let mut server = MongoServer::new(&working_dir).unwrap();
+    let mut server = MongoServer::new(&working_dir, MongoOptions::default()).unwrap();
     let _ = server.start().await.unwrap();
 
     println!("Ready");

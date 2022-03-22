@@ -200,6 +200,8 @@ impl BinaryDownload {
     ///
     /// * `path` - The path to download the binary into
     pub async fn download<P: AsRef<Path>>(&self, path: P) -> Result<(), MemoryServerError> {
+        fs::create_dir_all(&path)?;
+
         let dir: &Path = path.as_ref();
         let download_url = self.download_url()?;
 
@@ -249,8 +251,7 @@ impl BinaryDownload {
 
 #[cfg(test)]
 mod tests {
-    use crate::BinaryDownload;
-    use crate::download::{MongoBinary};
+    use crate::download::{BinaryDownload, MongoBinary};
 
     use std::fs;
     use std::fs::File;
