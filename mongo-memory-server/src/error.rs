@@ -7,6 +7,8 @@ pub enum MemoryServerError {
     UnsupportedOs(String),
     #[error("unsupported os arch: {0}")]
     UnsupportedOsArch(String),
+    #[error("version incompatible: {0}")]
+    VersionIncompatible(String),
     #[error("invalid download url: {0}")]
     InvalidDownloadUrl(String),
     #[error("error while downloading file")]

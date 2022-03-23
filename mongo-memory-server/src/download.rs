@@ -8,7 +8,7 @@ use std::path::Path;
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use futures_util::StreamExt;
-use os_info::{Bitness, Info as OsInfo, Type as OsType};
+use os_info::{Info as OsInfo, Type as OsType};
 use piz::ZipArchive;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use semver::{Version, VersionReq};
@@ -56,8 +56,8 @@ impl MongoBinary {
     /// Returns the archive name
     pub fn archive_name(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
-            OsType::Windows => self.win_archive_name(),
-            OsType::Debian | OsType::Ubuntu => self.linux_archive_name(),
+            OsType::Windows => Ok(self.win_archive_name()),
+            OsType::Debian | OsType::Ubuntu => Ok(self.linux_archive_name()),
             _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
     }
@@ -87,18 +87,62 @@ impl MongoBinary {
 
     /// Returns the archive name for `Linux` architectures
     /// - https://www.mongodb.org/dl/linux
-    fn linux_archive_name(&self) -> Result<String, MemoryServerError> {
+    fn linux_archive_name(&self) -> String {
+        let arch = &self.arch;
+        let version = &self.mongo_version;
+
+        let mut name = format!("mongodb-linux-{}", arch);
+
+        // The highest version for `i686` seems to be `3.3`
+        if arch != "i686" {
+            if let Ok(os_string) = self.linux_os_string() {
+                name = format!("{}-{}", name, os_string);
+            }
+        }
+
+        format!("{}-{}", name, version)
+    }
+
+    fn linux_os_string(&self) -> Result<String, MemoryServerError> {
+        match self.os_info.os_type() {
+            OsType::Debian => self.linux_debian_os_string(),
+            OsType::Ubuntu => self.linux_ubuntu_os_string(),
+            _ => unreachable!()
+        }
+    }
+
+    fn linux_debian_os_string(&self) -> Result<String, MemoryServerError> {
+        let version = self.os_info.version();
+        let version = semver::Version::parse(version.to_string().as_str()).unwrap();
+
+        let release = if semver::VersionReq::parse(">=10").unwrap().matches(&version) {
+            if semver::VersionReq::parse("<=4.2.1").unwrap().matches(&self.mongo_version) {
+                return Err(MemoryServerError::VersionIncompatible("Mongodb does not provide binaries for versions before 4.2.1 for Debian 10+ and also cannot be mapped to a previous Debian release".to_string()));
+            }
+
+            "10"
+        } else if semver::VersionReq::parse(">=9.0").unwrap().matches(&version) {
+            "92"
+        } else if semver::VersionReq::parse(">=8.1").unwrap().matches(&version) {
+            "81"
+        } else if semver::VersionReq::parse(">=7.1").unwrap().matches(&version) {
+            "71"
+        } else {
+            ""
+        };
+
+        Ok(format!("debian{}", release))
+    }
+
+    fn linux_ubuntu_os_string(&self) -> Result<String, MemoryServerError> {
         todo!()
     }
 
     /// Returns the archive name for `Windows`:
     /// - https://www.mongodb.org/dl/win32 for `MongoDB <= 4.2.x`
     /// - https://www.mongodb.org/dl/windows for `MongoDB >= 4.3.0`
-    fn win_archive_name(&self) -> Result<String, MemoryServerError> {
-        let arch = match &self.os_info.bitness() {
-            Bitness::X64 => Ok("x86_64"),
-            _ => Err(MemoryServerError::UnsupportedOsArch(self.os_info.bitness().to_string())),
-        }?;
+    fn win_archive_name(&self) -> String {
+        let arch = &self.arch;
 
         let platform = if VersionReq::parse("<4.3.0").unwrap().matches(&self.mongo_version) {
             "win32".to_string()
@@ -114,7 +158,7 @@ impl MongoBinary {
             name = format!("{}-2008plus-ssl", name);
         }
 
-        Ok(format!("{}-{}", name, self.mongo_version))
+        format!("{}-{}", name, self.mongo_version)
     }
 
     /// Translate input platform to `MongoDB` known
@@ -309,6 +353,7 @@ impl BinaryDownload {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use crate::download::{BinaryDownload, MongoBinary};
 
     use std::fs;
@@ -321,13 +366,19 @@ mod tests {
     use tempfile::TempDir;
     use zip::CompressionMethod;
 
-    #[derive(Serialize)]
+    #[derive(Clone, Serialize)]
     struct OsInfo {
         pub os_type: OsType,
         pub version: OsVersion,
         pub edition: Option<String>,
         pub codename: Option<String>,
         pub bitness: Bitness,
+    }
+
+    impl From<OsInfo> for os_info::Info {
+        fn from(os_info: OsInfo) -> Self {
+            serde_json::from_str::<os_info::Info>(serde_json::to_string(&os_info).unwrap().as_str()).unwrap()
+        }
     }
 
     fn create_win_os() -> (os_info::Info, String) {
@@ -339,8 +390,21 @@ mod tests {
             bitness: Bitness::X64,
         };
 
-        let os_info = serde_json::from_str::<os_info::Info>(serde_json::to_string(&os_info).unwrap().as_str()).unwrap();
+        let os_info = os_info::Info::from(os_info);
         let arch = "x86_64".to_string();
+        (os_info, arch)
+    }
+
+    fn create_linux_debian_os() -> (OsInfo, String) {
+        let os_info = OsInfo {
+            os_type: OsType::Debian,
+            version: OsVersion::Unknown,
+            edition: None,
+            codename: None,
+            bitness: Bitness::X64,
+        };
+
+        let arch = "arm64".to_string();
         (os_info, arch)
     }
 
@@ -383,7 +447,7 @@ mod tests {
         let mongo_version = Version::parse("5.2.0").unwrap();
         let (os_info, arch) = create_win_os();
         let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
-        let archive = mongo_binary.win_archive_name().unwrap();
+        let archive = mongo_binary.win_archive_name();
 
         assert_eq!(archive, "mongodb-windows-x86_64-5.2.0".to_string());
     }
@@ -393,7 +457,7 @@ mod tests {
         let mongo_version = Version::parse("5.2.0").unwrap();
         let (os_info, arch) = create_win_os();
         let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
-        let archive = mongo_binary.win_archive_name().unwrap();
+        let archive = mongo_binary.win_archive_name();
 
         assert_eq!(archive, "mongodb-windows-x86_64-5.2.0".to_string());
     }
@@ -403,7 +467,7 @@ mod tests {
         let mongo_version = Version::parse("4.2.1").unwrap();
         let (os_info, arch) = create_win_os();
         let binary_download_url = MongoBinary::new(os_info, mongo_version, arch).unwrap();
-        let mongo_binary = binary_download_url.win_archive_name().unwrap();
+        let mongo_binary = binary_download_url.win_archive_name();
 
         assert_eq!(mongo_binary, "mongodb-win32-x86_64-2012plus-4.2.1".to_string());
     }
@@ -413,7 +477,7 @@ mod tests {
         let mongo_version = Version::parse("4.1.0").unwrap();
         let (os_info, arch) = create_win_os();
         let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
-        let archive = mongo_binary.win_archive_name().unwrap();
+        let archive = mongo_binary.win_archive_name();
 
         assert_eq!(archive, "mongodb-win32-x86_64-4.1.0".to_string());
     }
@@ -423,9 +487,31 @@ mod tests {
         let mongo_version = Version::parse("3.4.0").unwrap();
         let (os_info, arch) = create_win_os();
         let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
-        let archive = mongo_binary.win_archive_name().unwrap();
+        let archive = mongo_binary.win_archive_name();
 
         assert_eq!(archive, "mongodb-win32-x86_64-2008plus-ssl-3.4.0".to_string());
+    }
+
+    #[test]
+    fn test_binary_linux_debian_archive_name() {
+        let mongo_version = Version::parse("5.2.0").unwrap();
+        let (mut os_info, arch) = create_linux_debian_os();
+
+        let test_cases = HashMap::from([
+            ("10.0", "mongodb-linux-arm64-debian10-5.2.0"),
+            ("9.0", "mongodb-linux-arm64-debian92-5.2.0"),
+            ("8.2", "mongodb-linux-arm64-debian81-5.2.0"),
+            ("8.0", "mongodb-linux-arm64-debian71-5.2.0"),
+            ("7.1", "mongodb-linux-arm64-debian71-5.2.0"),
+            ("6.0", "mongodb-linux-arm64-debian-5.2.0"),
+        ]);
+
+        for (ver, expected) in test_cases {
+            os_info.version = OsVersion::from_string(ver);
+            let mongo_binary = MongoBinary::new(os_info::Info::from(os_info.clone()), mongo_version.clone(), arch.clone()).unwrap();
+            let archive = mongo_binary.linux_archive_name();
+            assert_eq!(archive, expected.to_string());
+        }
     }
 
     #[test]
