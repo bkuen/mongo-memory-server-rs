@@ -23,10 +23,11 @@ mod tests {
             let path = Path::new(&cargo_home).join("mongo-memory-server");
 
             let os_info = os_info::get();
+            let arch = env!("TARGET_ARCH").to_string();
 
-            let binary = MongoBinary::new(os_info.clone(), mongo_version.clone());
+            let binary = MongoBinary::new(os_info.clone(), mongo_version.clone(), arch.clone()).unwrap();
             if !binary.is_present(&path).unwrap() {
-                let binary_download = BinaryDownload::new(os_info, mongo_version);
+                let binary_download = BinaryDownload::new(os_info, mongo_version, arch).unwrap();
                 binary_download.download(&path).await.unwrap();
                 binary_download.extract_zip(&path.join("mongodb-windows-x86_64-5.2.0.zip")).unwrap();
             }
@@ -41,9 +42,10 @@ mod tests {
         let cargo_home = std::env::var("CARGO_HOME").unwrap();
         let mongo_version = Version::parse("5.2.0").unwrap();
         let os_info = os_info::get();
+        let arch = env!("TARGET_ARCH").to_string();
         let path = Path::new(&cargo_home).join("mongo-memory-server");
 
-        let binary = MongoBinary::new(os_info.clone(), mongo_version.clone());
+        let binary = MongoBinary::new(os_info.clone(), mongo_version.clone(), arch).unwrap();
         assert!(binary.is_present(&path).unwrap())
     }
 

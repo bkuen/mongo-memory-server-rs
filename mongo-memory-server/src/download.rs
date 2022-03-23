@@ -19,6 +19,8 @@ const BINARY_URL: &str = "https://fastdl.mongodb.org";
 pub struct MongoBinary {
     os_info: OsInfo,
     mongo_version: Version,
+    arch: String,
+    platform: String,
 }
 
 impl MongoBinary {
@@ -28,11 +30,17 @@ impl MongoBinary {
     ///
     /// * `os_info` - Os information required to detect the correct platform, architecture and file ending
     /// * `mongo_version` - The `MongoDB` version to download
-    pub fn new(os_info: OsInfo, mongo_version: Version) -> Self {
-        Self {
+    /// * `arch` - The underlying architecture the download depends on
+    pub fn new(os_info: OsInfo, mongo_version: Version, arch: String) -> Result<Self, MemoryServerError> {
+        let platform = MongoBinary::translate_platform(os_info.os_type(), &mongo_version)?;
+        let arch = MongoBinary::translate_arch(arch, platform.clone())?;
+
+        Ok(Self {
             os_info,
             mongo_version,
-        }
+            arch,
+            platform,
+        })
     }
 
     /// Returns true if the binary is already present at the given path
@@ -49,14 +57,7 @@ impl MongoBinary {
     pub fn archive_name(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
             OsType::Windows => self.win_archive_name(),
-            _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
-        }
-    }
-
-    /// Returns the archive platform
-    pub fn archive_platform(&self) -> Result<String, MemoryServerError> {
-        match self.os_info.os_type() {
-            OsType::Windows => Ok("windows".to_string()),
+            OsType::Debian | OsType::Ubuntu => self.linux_archive_name(),
             _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
     }
@@ -65,13 +66,14 @@ impl MongoBinary {
     pub fn archive_file_ending(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
             OsType::Windows => Ok("zip".to_string()),
+            OsType::Debian | OsType::Ubuntu => Ok("tgz".to_string()),
             _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
     }
 
     /// Returns the download archive name
     pub fn download_archive_name(&self) -> Result<String, MemoryServerError> {
-        let archive_platform = self.archive_platform()?;
+        let archive_platform = &self.platform;
         let archive_name = self.archive_name()?;
         let archive_file_ending = self.archive_file_ending()?;
         Ok(format!("{}/{}.{}", archive_platform, archive_name, archive_file_ending))
@@ -81,6 +83,12 @@ impl MongoBinary {
     pub fn download_url(&self) -> Result<String, MemoryServerError> {
         let archive = self.download_archive_name()?;
         Ok(format!("{}/{}", BINARY_URL, archive))
+    }
+
+    /// Returns the archive name for `Linux` architectures
+    /// - https://www.mongodb.org/dl/linux
+    fn linux_archive_name(&self) -> Result<String, MemoryServerError> {
+        todo!()
     }
 
     /// Returns the archive name for `Windows`:
@@ -108,9 +116,58 @@ impl MongoBinary {
 
         Ok(format!("{}-{}", name, self.mongo_version))
     }
+
+    /// Translate input platform to `MongoDB` known
+    ///
+    /// # Arguments
+    ///
+    /// * `platform` - The [OsType](os_info::type::Type) platform to translate
+    /// * `mongo_version` - The `MongoDB` version to download or already used
+    fn translate_platform(platform: OsType, mongo_version: &Version) -> Result<String, MemoryServerError> {
+        match platform {
+            OsType::Windows => {
+                if mongo_version >= &semver::Version::parse("4.3.0").unwrap() {
+                    Ok("windows")
+                } else {
+                    Ok("win32")
+                }
+            },
+            OsType::Debian | OsType::Ubuntu => Ok("linux"),
+            _ => Err(MemoryServerError::UnsupportedOs(platform.to_string()))
+        }.map(|s| s.to_string())
+    }
+
+    /// Translate input arch to `MongoDB` known arch
+    ///
+    /// # Arguments
+    ///
+    /// * `arch` - The architecture to translate
+    /// * `platform` - The platform
+    ///
+    /// # Example
+    ///
+    /// `x64` -> `x86_64`
+    fn translate_arch(arch: String, platform: String) -> Result<String, MemoryServerError> {
+        let platform = platform.as_str();
+        match arch.as_str() {
+            "ia32" => {
+                if platform == "linux" {
+                    Ok("i686")
+                } else if platform == "win32" {
+                    Ok("i386")
+                } else {
+                    Err(MemoryServerError::UnsupportedOsArch(arch))
+                }
+            },
+            "x64" | "x86_64" => Ok("x86_64"),
+            "arm64" => Ok("arm64"),
+            "aarch64" => Ok("aarch64"),
+            _ => Err(MemoryServerError::UnsupportedOsArch(arch))
+        }.map(|s| s.to_string())
+    }
 }
 
-/// A struct managing downloads from https://fastdl.mongodb.org/
+/// A struct managing downloads from `<https://fastdl.mongodb.org/>`
 /// according to the the operating system
 pub struct BinaryDownload {
     binary: MongoBinary,
@@ -123,11 +180,12 @@ impl BinaryDownload {
     ///
     /// * `os_info` - Os information required to detect the correct platform, architecture and file ending
     /// * `mongo_version` - The `MongoDB` version to download
-    pub fn new(os_info: OsInfo, mongo_version: Version) -> Self {
-        let binary = MongoBinary::new(os_info, mongo_version);
-        Self {
+    /// * `arch` - The architecture the download depends on
+    pub fn new(os_info: OsInfo, mongo_version: Version, arch: String) -> Result<Self, MemoryServerError> {
+        let binary = MongoBinary::new(os_info, mongo_version, arch)?;
+        Ok(Self {
             binary,
-        }
+        })
     }
 
     /// Extracts a zip compressed `MongoDB` (Windows) binary located at the given path
@@ -272,7 +330,7 @@ mod tests {
         pub bitness: Bitness,
     }
 
-    fn create_win_os() -> os_info::Info {
+    fn create_win_os() -> (os_info::Info, String) {
         let os_info = OsInfo {
             os_type: OsType::Windows,
             version: OsVersion::Unknown,
@@ -281,24 +339,50 @@ mod tests {
             bitness: Bitness::X64,
         };
 
-        serde_json::from_str::<os_info::Info>(serde_json::to_string(&os_info).unwrap().as_str()).unwrap()
+        let os_info = serde_json::from_str::<os_info::Info>(serde_json::to_string(&os_info).unwrap().as_str()).unwrap();
+        let arch = "x86_64".to_string();
+        (os_info, arch)
     }
 
     #[test]
-    fn test_binary_archive_platform_windows() {
+    fn test_binary_translate_platform_windows() {
         let mongo_version = Version::parse("5.2.0").unwrap();
-        let os_info = create_win_os();
-        let mongo_binary = MongoBinary::new(os_info, mongo_version);
-        let archive_platform = mongo_binary.archive_platform().unwrap();
+        let (os_info, arch) = create_win_os();
+        let os_type = os_info.os_type();
+        let mongo_binary = MongoBinary::new(os_info, mongo_version.clone(), arch).unwrap();
+        let platform = MongoBinary::translate_platform(os_type, &mongo_version).unwrap();
 
-        assert_eq!(archive_platform, "windows".to_string());
+        assert_eq!(platform, "windows".to_string());
+    }
+
+    #[test]
+    fn test_binary_translate_platform() {
+        let mongo_version = Version::parse("5.2.0").unwrap();
+        let mongo_version_win32 = Version::parse("4.1.0").unwrap();
+
+        assert_eq!(MongoBinary::translate_platform(OsType::Windows, &mongo_version).unwrap(), "windows".to_string());
+        assert_eq!(MongoBinary::translate_platform(OsType::Windows, &mongo_version_win32).unwrap(), "win32".to_string());
+        assert_eq!(MongoBinary::translate_platform(OsType::Debian, &mongo_version).unwrap(), "linux".to_string());
+        assert_eq!(MongoBinary::translate_platform(OsType::Ubuntu, &mongo_version).unwrap(), "linux".to_string());
+    }
+
+    #[test]
+    fn test_binary_translate_arch() {
+        assert_eq!(MongoBinary::translate_arch("ia32".to_string(), "linux".to_string()).unwrap(), "i686".to_string());
+        assert_eq!(MongoBinary::translate_arch("ia32".to_string(), "win32".to_string()).unwrap(), "i386".to_string());
+        assert!(MongoBinary::translate_arch("ia32".to_string(), "osx".to_string()).is_err());
+        assert_eq!(MongoBinary::translate_arch("x86_64".to_string(), "win32".to_string()).unwrap(), "x86_64".to_string());
+        assert_eq!(MongoBinary::translate_arch("x64".to_string(), "win32".to_string()).unwrap(), "x86_64".to_string());
+        assert_eq!(MongoBinary::translate_arch("arm64".to_string(), "linux".to_string()).unwrap(), "arm64".to_string());
+        assert_eq!(MongoBinary::translate_arch("aarch64".to_string(), "linux".to_string()).unwrap(), "aarch64".to_string());
+        assert!(MongoBinary::translate_arch("powerpc64".to_string(), "linux".to_string()).is_err());
     }
 
     #[test]
     fn test_binary_win_archive_name_gte_4_3_0() {
         let mongo_version = Version::parse("5.2.0").unwrap();
-        let os_info = create_win_os();
-        let mongo_binary = MongoBinary::new(os_info, mongo_version);
+        let (os_info, arch) = create_win_os();
+        let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
         let archive = mongo_binary.win_archive_name().unwrap();
 
         assert_eq!(archive, "mongodb-windows-x86_64-5.2.0".to_string());
@@ -307,8 +391,8 @@ mod tests {
     #[test]
     fn test_binary_win_archive_name_4_3_0() {
         let mongo_version = Version::parse("5.2.0").unwrap();
-        let os_info = create_win_os();
-        let mongo_binary = MongoBinary::new(os_info, mongo_version);
+        let (os_info, arch) = create_win_os();
+        let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
         let archive = mongo_binary.win_archive_name().unwrap();
 
         assert_eq!(archive, "mongodb-windows-x86_64-5.2.0".to_string());
@@ -317,8 +401,8 @@ mod tests {
     #[test]
     fn test_binary_win_archive_name_4_2_x() {
         let mongo_version = Version::parse("4.2.1").unwrap();
-        let os_info = create_win_os();
-        let binary_download_url = MongoBinary::new(os_info, mongo_version);
+        let (os_info, arch) = create_win_os();
+        let binary_download_url = MongoBinary::new(os_info, mongo_version, arch).unwrap();
         let mongo_binary = binary_download_url.win_archive_name().unwrap();
 
         assert_eq!(mongo_binary, "mongodb-win32-x86_64-2012plus-4.2.1".to_string());
@@ -327,8 +411,8 @@ mod tests {
     #[test]
     fn test_binary_win_archive_name_4_1_0() {
         let mongo_version = Version::parse("4.1.0").unwrap();
-        let os_info = create_win_os();
-        let mongo_binary = MongoBinary::new(os_info, mongo_version);
+        let (os_info, arch) = create_win_os();
+        let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
         let archive = mongo_binary.win_archive_name().unwrap();
 
         assert_eq!(archive, "mongodb-win32-x86_64-4.1.0".to_string());
@@ -337,8 +421,8 @@ mod tests {
     #[test]
     fn test_binary_win_archive_name_lte_4_1_0() {
         let mongo_version = Version::parse("3.4.0").unwrap();
-        let os_info = create_win_os();
-        let mongo_binary = MongoBinary::new(os_info, mongo_version);
+        let (os_info, arch) = create_win_os();
+        let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
         let archive = mongo_binary.win_archive_name().unwrap();
 
         assert_eq!(archive, "mongodb-win32-x86_64-2008plus-ssl-3.4.0".to_string());
@@ -347,8 +431,8 @@ mod tests {
     #[test]
     fn test_binary_archive_download_url() {
         let mongo_version = Version::parse("5.2.0").unwrap();
-        let os_info = create_win_os();
-        let mongo_binary = MongoBinary::new(os_info, mongo_version);
+        let (os_info, arch) = create_win_os();
+        let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
         let url = mongo_binary.download_url().unwrap();
 
         assert_eq!(url, "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-5.2.0.zip".to_string());
@@ -357,8 +441,8 @@ mod tests {
     #[test]
     fn test_binary_download_extract_zip() {
         let mongo_version = Version::parse("5.2.0").unwrap();
-        let os_info = create_win_os();
-        let binary_download = BinaryDownload::new(os_info, mongo_version);
+        let (os_info, arch) = create_win_os();
+        let binary_download = BinaryDownload::new(os_info, mongo_version, arch).unwrap();
 
         let temp_dir = TempDir::new().unwrap();
         let zip_path = temp_dir.path().join("mongodb-windows-x86_64-5.2.0.zip");
@@ -379,9 +463,9 @@ mod tests {
 
     #[test]
     fn test_binary_is_present() {
-        let os_info = create_win_os();
+        let (os_info, arch) = create_win_os();
         let mongo_version = Version::parse("5.2.0").unwrap();
-        let mongo_binary = MongoBinary::new(os_info, mongo_version);
+        let mongo_binary = MongoBinary::new(os_info, mongo_version, arch).unwrap();
         let temp_dir = TempDir::new().unwrap();
 
         assert!(!mongo_binary.is_present(&temp_dir).unwrap());
