@@ -28,8 +28,17 @@ mod tests {
             let binary = MongoBinary::new(os_info.clone(), mongo_version.clone(), arch.clone()).unwrap();
             if !binary.is_present(&path).unwrap() {
                 let binary_download = BinaryDownload::new(os_info, mongo_version, arch).unwrap();
+                let archive_name = binary.archive_name().unwrap();
+                let file_ending = binary.archive_file_ending().unwrap();
+                let binary_dir = path.join(format!("{}.{}", archive_name, file_ending));
+
                 binary_download.download(&path).await.unwrap();
-                binary_download.extract_zip(&path.join("mongodb-windows-x86_64-5.2.0.zip")).unwrap();
+
+                match file_ending.as_str() {
+                    "zip" => binary_download.extract_zip(&binary_dir).unwrap(),
+                    "tgz" => binary_download.extract_tgz(&binary_dir).unwrap(),
+                    _ => {}
+                };
             }
 
             Self

@@ -4,14 +4,16 @@ use std::cmp::min;
 use std::{fs, io, path};
 use std::fs::File;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use flate2::read::GzDecoder;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use futures_util::StreamExt;
 use os_info::{Info as OsInfo, Type as OsType};
 use piz::ZipArchive;
 use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use semver::{Version, VersionReq};
+use tar::{Archive as TarArchive};
 
 const BINARY_URL: &str = "https://fastdl.mongodb.org";
 
@@ -53,7 +55,7 @@ impl MongoBinary {
         Ok(path.as_ref().join(archive_name).exists())
     }
 
-    /// Returns the archive name
+    /// Returns the archive name without the file ending
     pub fn archive_name(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
             OsType::Windows => Ok(self.win_archive_name()),
@@ -291,6 +293,51 @@ impl BinaryDownload {
         Ok(())
     }
 
+    /// Extracts a tgz compressed `MongoDB` binary located at the given path
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to the compressed binary
+    pub fn extract_tgz<P: AsRef<Path>>(&self, path: P) -> Result<(), MemoryServerError> {
+        let path_str = path.as_ref().to_str().unwrap();
+
+        // The name of the binary will be our base directory name
+        let parent_dir = path.as_ref().with_extension("");
+
+        let tgz_file = File::open(&path)?;
+        let tar = GzDecoder::new(tgz_file);
+        let mut archive = TarArchive::new(tar);
+
+        println!("Extracting {}...", path_str);
+
+        // Initialize progress bar
+        let mp = MultiProgress::new();
+
+        archive
+            .entries()?
+            .filter_map(|e| e.ok())
+            .map(|mut entry| -> io::Result<PathBuf> {
+                // We extract each file directly in our new directory so we can skip the first directory
+                let entry_path: path::PathBuf = entry.path()?.to_path_buf().iter().skip(1)
+                    .collect();
+
+                let dest_path = parent_dir.join(&entry_path);
+
+                let pb = ProgressBar::new_spinner();
+                pb.set_style(ProgressStyle::default_spinner());
+                mp.add(pb.clone());
+
+                entry.unpack(&dest_path)?;
+                pb.set_position(1);
+
+                Ok(dest_path)
+            })
+            .filter_map(|e| e.ok())
+            .for_each(|x| println!("> {}", x.display()));
+
+        Ok(())
+    }
+
     /// Returns the download_url
     pub fn download_url(&self) -> Result<String, MemoryServerError> {
         self.binary.download_url()
@@ -359,6 +406,8 @@ mod tests {
     use std::fs;
     use std::fs::File;
     use std::io::Write;
+    use flate2::Compression;
+    use flate2::read::{GzDecoder, GzEncoder};
 
     use os_info::{Bitness, Type as OsType, Version as OsVersion};
     use semver::Version;
@@ -398,7 +447,7 @@ mod tests {
     fn create_linux_debian_os() -> (OsInfo, String) {
         let os_info = OsInfo {
             os_type: OsType::Debian,
-            version: OsVersion::Unknown,
+            version: OsVersion::Semantic(10, 0, 0),
             edition: None,
             codename: None,
             bitness: Bitness::X64,
@@ -545,6 +594,35 @@ mod tests {
 
         let unzip_path = temp_dir.path().join("mongodb-windows-x86_64-5.2.0");
         assert!(unzip_path.exists());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_binary_download_extract_tgz() {
+        let mongo_version = Version::parse("5.2.0").unwrap();
+        let (os_info, arch) = create_linux_debian_os();
+        let binary_download = BinaryDownload::new(os_info::Info::from(os_info), mongo_version, arch).unwrap();
+
+        let temp_dir = TempDir::new().unwrap();
+        let tgz_path = temp_dir.path().join("mongodb-linux-arm64-debian10-5.2.0.tgz");
+
+        fs::create_dir(temp_dir.path().join("data_test")).unwrap();
+        let mut data_file = File::create("data_test/data.txt").unwrap();
+        data_file.write(b"Hello world");
+
+        let tgz_file = File::create(&tgz_path).unwrap();
+        let encoder = GzEncoder::new(tgz_file, Compression::default());
+        let mut tar = tar::Builder::new(encoder);
+        tar.append_dir("data", "./data_test");
+
+        binary_download.extract_tgz(&tgz_path).unwrap();
+
+        fs::read_dir(temp_dir.path()).unwrap().for_each(|path| {
+            println!("{}", path.unwrap().path().display());
+        });
+
+        let uncompressed_path = temp_dir.path().join("mongodb-linux-arm64-debian10-5.2.0");
+        assert!(uncompressed_path.exists());
     }
 
     #[test]
