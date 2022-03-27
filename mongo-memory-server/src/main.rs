@@ -24,7 +24,7 @@ async fn main() -> io::Result<()> {
     if !binary.is_present(&path).unwrap() {
         let binary_download = BinaryDownload::new(os_info, mongo_version, arch).unwrap();
         binary_download.download(&path).await.unwrap();
-        binary_download.extract_zip(&path.join("mongodb-windows-x86_64-5.2.0.zip")).unwrap();
+        binary_download.extract(&path.join("mongodb-windows-x86_64-5.2.0.zip")).unwrap();
     }
 
     let working_dir = path.join("mongodb-windows-x86_64-5.2.0\\bin");

@@ -3,19 +3,19 @@ use crate::error::MemoryServerError;
 use std::cmp::min;
 use std::{fs, io, path};
 use std::fs::File;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::io::{Write};
+use std::path::{Path};
 
-use flate2::read::GzDecoder;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use futures_util::StreamExt;
 use os_info::{Info as OsInfo, Type as OsType};
-use piz::ZipArchive;
-use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 use semver::{Version, VersionReq};
-use tar::{Archive as TarArchive};
 
+/// The default binary url from which binaries are downloaded
 const BINARY_URL: &str = "https://fastdl.mongodb.org";
+
+/// This version constant should correspond to the latest LTS version of `Ubuntu`
+const CURRENT_UBUNTU_LTS_VERSION: &str = "20.04";
 
 /// A struct representing a `MongoDB` binary
 pub struct MongoBinary {
@@ -59,7 +59,9 @@ impl MongoBinary {
     pub fn archive_name(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
             OsType::Windows => Ok(self.win_archive_name()),
-            OsType::Debian | OsType::Ubuntu => Ok(self.linux_archive_name()),
+            OsType::Debian |
+            OsType::Ubuntu |
+            OsType::Mint => Ok(self.linux_archive_name()),
             _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
     }
@@ -90,29 +92,32 @@ impl MongoBinary {
     /// Returns the archive name for `Linux` architectures
     /// - https://www.mongodb.org/dl/linux
     fn linux_archive_name(&self) -> String {
-        let arch = &self.arch;
+        let mut arch = self.arch.clone();
         let version = &self.mongo_version;
 
-        let mut name = format!("mongodb-linux-{}", arch);
-
         // The highest version for `i686` seems to be `3.3`
+        let mut name = "".to_string();
         if arch != "i686" {
-            if let Ok(os_string) = self.linux_os_string() {
-                name = format!("{}-{}", name, os_string);
+            if let Ok((os_string, os_arch)) = self.linux_os_string() {
+                arch = os_arch;
+                name = format!("-{}", os_string);
             }
         }
 
-        format!("{}-{}", name, version)
+        format!("mongodb-linux-{}{}-{}", arch, name, version)
     }
 
-    fn linux_os_string(&self) -> Result<String, MemoryServerError> {
+    /// Returns the name for a `Linux` os in a `MongoDB` understandable way
+    fn linux_os_string(&self) -> Result<(String, String), MemoryServerError> {
         match self.os_info.os_type() {
-            OsType::Debian => self.linux_debian_os_string(),
-            OsType::Ubuntu => self.linux_ubuntu_os_string(),
+            OsType::Debian => self.linux_debian_os_string()
+                .map(|os_string| (os_string, self.arch.clone())),
+            OsType::Ubuntu | OsType::Mint => self.linux_ubuntu_os_string(),
             _ => unreachable!()
         }
     }
 
+    /// Returns the name for a `Debian` os in a `MongoDB` understandable way
     fn linux_debian_os_string(&self) -> Result<String, MemoryServerError> {
         let version = self.os_info.version();
         let version = semver::Version::parse(version.to_string().as_str()).unwrap();
@@ -136,8 +141,79 @@ impl MongoBinary {
         Ok(format!("debian{}", release))
     }
 
-    fn linux_ubuntu_os_string(&self) -> Result<String, MemoryServerError> {
-        todo!()
+    /// Returns the name for a `Ubuntu` os in a `MongoDB` understandable way
+    fn linux_ubuntu_os_string(&self) -> Result<(String, String), MemoryServerError> {
+        let os_info = &self.os_info;
+        let os_version = self.os_info.version();
+        let ubuntu_os = match os_info.os_type() {
+            OsType::Ubuntu => {
+                if let os_info::Version::Rolling(Some(version)) = os_version {
+                    version
+                } else {
+                    CURRENT_UBUNTU_LTS_VERSION
+                }
+            }
+            OsType::Mint => {
+                if let os_info::Version::Custom(version) = os_version {
+                    match version.split('.').next().unwrap() {
+                        "17" => "14.04",
+                        "18" => "16.04",
+                        "19" => "18.04",
+                        "20" => "20.04",
+                        _ => CURRENT_UBUNTU_LTS_VERSION
+                    }
+                } else {
+                    unreachable!()
+                }
+            }
+            _ => unreachable!()
+        };
+
+        let ubuntu_year: u8 = ubuntu_os.split('.').next().unwrap().parse().unwrap();
+        let mut arch = self.arch.clone();
+
+        // Currently, `MongoDB` only really provides `arm64` binaries for `ubuntu1604`
+        if arch.as_str() == "arm64" || arch.as_str() == "aarch64" {
+            if semver::VersionReq::parse("<4.1.0").unwrap().matches(&self.mongo_version) {
+                // Before before version `4.1.10`, everything for `arm64` / `aarch64` were just `arm64` and for `ubuntu1604`
+                arch = "arm64".to_string();
+
+                return Ok(("ubuntu1604".to_string(), arch));
+            }
+
+            if semver::VersionReq::parse(">=4.1.10").unwrap().matches(&self.mongo_version) {
+                // `MongoDB` changed since `4.1.0` to use `aarch64` instead of `arm64`
+                arch = "aarch64".to_string();
+
+                if semver::VersionReq::parse("<4.4.0").unwrap().matches(&self.mongo_version) {
+                    return Ok(("ubuntu1804".to_string(), arch));
+                }
+
+                return Ok((format!("ubuntu{}04", ubuntu_year), arch));
+            }
+        }
+
+        if ubuntu_os == "14.10" {
+            return Ok(("ubuntu1410-clang".to_string(), arch));
+        }
+
+        // There are no `MongoDB 3.x binary distributions` for `Ubuntu` >= `18`
+        // https://www.mongodb.org/dl/linux/x86_64-ubuntu1604
+        if ubuntu_year >= 18 && semver::VersionReq::parse("3.x.x").unwrap().matches(&self.mongo_version) {
+            return Ok(("ubuntu1604".to_string(), arch));
+        }
+
+        // There are no `MongoDB <=4.3.x binary distributions` for `Ubuntu` > `18`
+        // https://www.mongodb.org/dl/linux/x86_64-ubuntu1804
+        if ubuntu_year > 18 && semver::VersionReq::parse("<=4.3.x").unwrap().matches(&self.mongo_version) {
+            return Ok(("ubuntu1804".to_string(), arch));
+        }
+
+        if ubuntu_year >= 21 {
+            return Ok(("ubuntu2004".to_string(), arch));
+        }
+
+        return Ok((format!("ubuntu{}04", ubuntu_year), arch));
     }
 
     /// Returns the archive name for `Windows`:
@@ -234,12 +310,34 @@ impl BinaryDownload {
         })
     }
 
+    /// Extracts zip or tgz compressed binaries located at the given path depending on the os
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to the compressed binary
+    pub fn extract<P: AsRef<Path>>(&self, path: P) -> Result<(), MemoryServerError> {
+        let file_ending = self.binary.archive_file_ending()?;
+        match file_ending.as_str() {
+            #[cfg(target_family = "windows")]
+            "zip" => self.extract_zip(path),
+            #[cfg(target_family = "unix")]
+            "tgz" => self.extract_tgz(path),
+            _ => Ok(())
+        }
+    }
+
     /// Extracts a zip compressed `MongoDB` (Windows) binary located at the given path
     ///
     /// # Arguments
     ///
     /// * `path` - The path to the compressed binary
+    #[cfg(target_family = "windows")]
     pub fn extract_zip<P: AsRef<Path>>(&self, path: P) -> Result<(), MemoryServerError> {
+        use std::io::Read;
+
+        use piz::ZipArchive;
+        use rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+
         let path_str = path.as_ref().to_str().unwrap();
 
         // The name of the binary will be our base directory name
@@ -298,11 +396,18 @@ impl BinaryDownload {
     /// # Arguments
     ///
     /// * `path` - The path to the compressed binary
+    #[cfg(target_family = "unix")]
     pub fn extract_tgz<P: AsRef<Path>>(&self, path: P) -> Result<(), MemoryServerError> {
+        use std::path::PathBuf;
+
+        use flate2::read::GzDecoder;
+        use tar::{Archive as TarArchive};
+
         let path_str = path.as_ref().to_str().unwrap();
 
         // The name of the binary will be our base directory name
         let parent_dir = path.as_ref().with_extension("");
+        fs::create_dir_all(&parent_dir)?;
 
         let tgz_file = File::open(&path)?;
         let tar = GzDecoder::new(tgz_file);
@@ -313,6 +418,12 @@ impl BinaryDownload {
         // Initialize progress bar
         let mp = MultiProgress::new();
 
+        // archive
+        //     .entries()?
+        //     .for_each(|entry| {
+        //         println!("{:?}", entry.unwrap().path().unwrap());
+        //     });
+
         archive
             .entries()?
             .filter_map(|e| e.ok())
@@ -321,7 +432,12 @@ impl BinaryDownload {
                 let entry_path: path::PathBuf = entry.path()?.to_path_buf().iter().skip(1)
                     .collect();
 
+                println!("--> Entry: {:?}", &entry_path);
+
                 let dest_path = parent_dir.join(&entry_path);
+                fs::create_dir_all(&dest_path.parent().unwrap())?;
+
+                println!("--> {:?}", &dest_path);
 
                 let pb = ProgressBar::new_spinner();
                 pb.set_style(ProgressStyle::default_spinner());
@@ -400,20 +516,17 @@ impl BinaryDownload {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use crate::download::{BinaryDownload, MongoBinary};
 
+    use std::collections::HashMap;
     use std::fs;
     use std::fs::File;
     use std::io::Write;
-    use flate2::Compression;
-    use flate2::read::{GzDecoder, GzEncoder};
 
     use os_info::{Bitness, Type as OsType, Version as OsVersion};
     use semver::Version;
     use serde::Serialize;
     use tempfile::TempDir;
-    use zip::CompressionMethod;
 
     #[derive(Clone, Serialize)]
     struct OsInfo {
@@ -460,9 +573,8 @@ mod tests {
     #[test]
     fn test_binary_translate_platform_windows() {
         let mongo_version = Version::parse("5.2.0").unwrap();
-        let (os_info, arch) = create_win_os();
+        let (os_info, _) = create_win_os();
         let os_type = os_info.os_type();
-        let mongo_binary = MongoBinary::new(os_info, mongo_version.clone(), arch).unwrap();
         let platform = MongoBinary::translate_platform(os_type, &mongo_version).unwrap();
 
         assert_eq!(platform, "windows".to_string());
@@ -574,7 +686,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_family = "windows")]
     fn test_binary_download_extract_zip() {
+        use zip::CompressionMethod;
+
         let mongo_version = Version::parse("5.2.0").unwrap();
         let (os_info, arch) = create_win_os();
         let binary_download = BinaryDownload::new(os_info, mongo_version, arch).unwrap();
@@ -597,8 +712,11 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(target_family = "unix")]
     fn test_binary_download_extract_tgz() {
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+
         let mongo_version = Version::parse("5.2.0").unwrap();
         let (os_info, arch) = create_linux_debian_os();
         let binary_download = BinaryDownload::new(os_info::Info::from(os_info), mongo_version, arch).unwrap();
@@ -606,22 +724,26 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let tgz_path = temp_dir.path().join("mongodb-linux-arm64-debian10-5.2.0.tgz");
 
-        fs::create_dir(temp_dir.path().join("data_test")).unwrap();
-        let mut data_file = File::create("data_test/data.txt").unwrap();
-        data_file.write(b"Hello world");
+        let data_dir_path = temp_dir.path().join("data_test");
+        fs::create_dir(&data_dir_path).unwrap();
 
-        let tgz_file = File::create(&tgz_path).unwrap();
-        let encoder = GzEncoder::new(tgz_file, Compression::default());
-        let mut tar = tar::Builder::new(encoder);
-        tar.append_dir("data", "./data_test");
+        {
+            let mut data_file = File::create(temp_dir.path().join("data_test/data.txt")).unwrap();
+            data_file.write_all(b"Hello world").unwrap();
+        }
+
+        {
+            let tgz_file = File::create(&tgz_path).unwrap();
+            let encoder = GzEncoder::new(tgz_file, Compression::default());
+
+            let mut tar = tar::Builder::new(encoder);
+            tar.append_dir_all("data", &data_dir_path).unwrap();
+            let _ = tar.finish().unwrap();
+        }
 
         binary_download.extract_tgz(&tgz_path).unwrap();
 
-        fs::read_dir(temp_dir.path()).unwrap().for_each(|path| {
-            println!("{}", path.unwrap().path().display());
-        });
-
-        let uncompressed_path = temp_dir.path().join("mongodb-linux-arm64-debian10-5.2.0");
+        let uncompressed_path = temp_dir.path().join("mongodb-linux-arm64-debian10-5.2.0/data.txt");
         assert!(uncompressed_path.exists());
     }
 

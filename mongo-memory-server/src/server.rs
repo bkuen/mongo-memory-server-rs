@@ -109,7 +109,11 @@ impl<'a> MongoServer<'a> {
     pub async fn start(&mut self) -> Result<(), MemoryServerError> {
         let data_dir = self.data_dir.as_ref();
 
+        #[cfg(target_family = "windows")]
         let service_binary_path = self.working_dir.join("mongod.exe");
+
+        #[cfg(target_family = "unix")]
+        let service_binary_path = self.working_dir.join("mongod");
 
         let mut child = std::process::Command::new(service_binary_path)
             .arg("--dbpath")

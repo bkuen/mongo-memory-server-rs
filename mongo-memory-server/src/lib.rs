@@ -33,12 +33,7 @@ mod tests {
                 let binary_dir = path.join(format!("{}.{}", archive_name, file_ending));
 
                 binary_download.download(&path).await.unwrap();
-
-                match file_ending.as_str() {
-                    "zip" => binary_download.extract_zip(&binary_dir).unwrap(),
-                    "tgz" => binary_download.extract_tgz(&binary_dir).unwrap(),
-                    _ => {}
-                };
+                binary_download.extract(&binary_dir).unwrap();
             }
 
             Self
@@ -59,6 +54,7 @@ mod tests {
     }
 
     #[test_context(BinaryContext)]
+    #[ignore]
     #[tokio::test]
     async fn test_server_start(ctx: &mut BinaryContext) {
         let cargo_home = std::env::var("CARGO_HOME").unwrap();
