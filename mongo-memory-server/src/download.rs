@@ -89,6 +89,11 @@ impl MongoBinary {
         Ok(format!("{}/{}", BINARY_URL, archive))
     }
 
+    /// Returns os information
+    pub(crate) fn os_info(&self) -> &os_info::Info {
+        &self.os_info
+    }
+
     /// Returns the archive name for `Linux` architectures
     /// - https://www.mongodb.org/dl/linux
     fn linux_archive_name(&self) -> String {

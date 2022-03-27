@@ -1,13 +1,17 @@
 use crate::error::MemoryServerError;
 
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use regex::Regex;
-
+use semver::Version;
 use tempfile::TempDir;
+use crate::download::{BinaryDownload, MongoBinary};
+
+/// This version constant should correspond to the latest stable version of `MongoDB`
+const DEFAULT_MONGODB_VERSION: &str = "5.2.0";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MongoServerStatus {
@@ -34,6 +38,8 @@ pub struct MongoOptions<'a> {
     host: &'a str,
     port: u16,
     storage_engine: StorageEngine,
+    download_dir: PathBuf,
+    version: Version,
 }
 
 impl<'a> MongoOptions<'a> {
@@ -46,10 +52,16 @@ impl<'a> MongoOptions<'a> {
 
 impl<'a> Default for MongoOptions<'a> {
     fn default() -> Self {
+        let cargo_home = std::env::var("CARGO_HOME").unwrap();
+        let download_dir = Path::new(&cargo_home).join("mongo-memory-server");
+        let version = Version::parse(DEFAULT_MONGODB_VERSION).unwrap();
+
         Self {
             host: "0.0.0.0",
             port: 27777,
             storage_engine: StorageEngine::EphemeralForTest,
+            download_dir,
+            version,
         }
     }
 }
@@ -75,6 +87,11 @@ impl<'a> MongoOptionsBuilder<'a> {
         self
     }
 
+    pub fn download_dir<P: AsRef<Path> + 'a>(mut self, download_dir: &'a P) -> Self {
+        self.options.download_dir = download_dir.as_ref().to_path_buf();
+        self
+    }
+
     pub fn build(self) -> MongoOptions<'a> {
         self.options
     }
@@ -82,8 +99,9 @@ impl<'a> MongoOptionsBuilder<'a> {
 
 /// A struct representing a `MongoDB` memory server
 pub struct MongoServer<'a> {
-    working_dir: &'a Path,
     options: MongoOptions<'a>,
+    binary: MongoBinary,
+    arch: String,
     data_dir: TempDir,
     child: Option<Child>,
     status: Arc<Mutex<MongoServerStatus>>,
@@ -94,10 +112,16 @@ impl<'a> MongoServer<'a> {
     ///
     /// # Arguments
     ///
-    /// * `working_dir` - The working directory containing the binary
-    pub fn new<P: AsRef<Path> + 'a>(working_dir: &'a P, options: MongoOptions<'a>) -> Result<Self, MemoryServerError> {
+    /// * `options` - The options used to start the instance
+    pub fn new(options: MongoOptions<'a>) -> Result<Self, MemoryServerError> {
+        let os_info = os_info::get();
+        let arch = env!("TARGET_ARCH").to_string();
+
+        let binary = MongoBinary::new(os_info, options.version.clone(), arch.clone()).unwrap();
+
         Ok(Self {
-            working_dir: working_dir.as_ref(),
+            binary,
+            arch,
             options,
             data_dir: TempDir::new()?,
             child: None,
@@ -107,13 +131,36 @@ impl<'a> MongoServer<'a> {
 
     /// Start the binary in the `Windows` background
     pub async fn start(&mut self) -> Result<(), MemoryServerError> {
+        let options = &self.options;
+        let download_dir = &options.download_dir;
+        let working_dir = download_dir.join(self.binary.archive_name()?).join("bin");
+
+        println!("Download directory: {:?}", download_dir);
+        println!("Working directory: {:?}", working_dir);
+
+        let mongo_version = options.version.clone();
+
         let data_dir = self.data_dir.as_ref();
 
+        let arch = self.arch.clone();
+        let binary = &self.binary;
+        let os_info = binary.os_info().clone();
+
+        if !binary.is_present(download_dir).unwrap() {
+            let binary_download = BinaryDownload::new(os_info, mongo_version, arch).unwrap();
+            let archive_name = binary.archive_name().unwrap();
+            let file_ending = binary.archive_file_ending().unwrap();
+            let binary_dir = download_dir.join(format!("{}.{}", archive_name, file_ending));
+
+            binary_download.download(download_dir).await.unwrap();
+            binary_download.extract(&binary_dir).unwrap();
+        }
+
         #[cfg(target_family = "windows")]
-        let service_binary_path = self.working_dir.join("mongod.exe");
+        let service_binary_path = working_dir.join("mongod.exe");
 
         #[cfg(target_family = "unix")]
-        let service_binary_path = self.working_dir.join("mongod");
+        let service_binary_path = working_dir.join("mongod");
 
         let mut child = std::process::Command::new(service_binary_path)
             .arg("--dbpath")

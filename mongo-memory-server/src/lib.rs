@@ -54,14 +54,9 @@ mod tests {
     }
 
     #[test_context(BinaryContext)]
-    #[ignore]
     #[tokio::test]
     async fn test_server_start(ctx: &mut BinaryContext) {
-        let cargo_home = std::env::var("CARGO_HOME").unwrap();
-        let path = Path::new(&cargo_home).join("mongo-memory-server");
-        let working_dir = path.join("mongodb-windows-x86_64-5.2.0\\bin");
-
-        let mut server = MongoServer::new(&working_dir, MongoOptions::default()).unwrap();
+        let mut server = MongoServer::new(MongoOptions::default()).unwrap();
         let _ = server.start().await.unwrap();
 
         assert!(server.is_running());
