@@ -70,4 +70,6 @@ Of course, you could use the library with different testing setups as well.
 
 ## Sponsors
 
-This project is sponsored by
+This project is sponsored by 
+
+<img alt="DevStorage®" src="https://cdn.devstorage.eu/e/header-black.png" width="300">
