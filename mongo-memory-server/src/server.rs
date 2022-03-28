@@ -37,16 +37,23 @@ impl From<StorageEngine> for String {
 pub struct MongoOptions<'a> {
     host: &'a str,
     port: u16,
+    init_database: &'a str,
     storage_engine: StorageEngine,
     download_dir: PathBuf,
     version: Version,
 }
 
 impl<'a> MongoOptions<'a> {
+    /// Returns an option builder
     pub fn builder() -> MongoOptionsBuilder<'a> {
         MongoOptionsBuilder {
             options: Default::default(),
         }
+    }
+
+    /// Returns the uri described in https://www.mongodb.com/docs/manual/reference/connection-string/
+    pub fn uri(&self) -> String {
+        format!("mongodb://{}:{}/{}", self.host, self.port, self.init_database)
     }
 }
 
@@ -59,6 +66,7 @@ impl<'a> Default for MongoOptions<'a> {
         Self {
             host: "0.0.0.0",
             port: 27777,
+            init_database: "test",
             storage_engine: StorageEngine::EphemeralForTest,
             download_dir,
             version,
@@ -79,6 +87,11 @@ impl<'a> MongoOptionsBuilder<'a> {
 
     pub fn port(mut self, port: u16) -> Self {
         self.options.port = port;
+        self
+    }
+
+    pub fn init_database(mut self, init_database: &'a str) -> Self {
+        self.options.init_database = init_database;
         self
     }
 
@@ -201,6 +214,11 @@ impl<'a> MongoServer<'a> {
         let status = self.status.lock().unwrap();
         *status == MongoServerStatus::Ready
     }
+
+    /// Returns the uri described in https://www.mongodb.com/docs/manual/reference/connection-string/
+    pub fn uri(&self) -> String {
+        self.options.uri()
+    }
 }
 
 fn listen_on_events(child: &mut Child, status: Arc<Mutex<MongoServerStatus>>) {
@@ -244,11 +262,25 @@ mod tests {
         let mongo_options = MongoOptions::builder()
             .host("127.0.0.1")
             .port(28000)
+            .init_database("initdb")
             .storage_engine(StorageEngine::EphemeralForTest)
             .build();
 
         assert_eq!(mongo_options.host, "127.0.0.1");
         assert_eq!(mongo_options.port, 28000);
+        assert_eq!(mongo_options.init_database, "initdb");
         assert_eq!(mongo_options.storage_engine, StorageEngine::EphemeralForTest);
+    }
+
+    #[test]
+    fn test_mongo_options_uri() {
+        let mongo_options = MongoOptions::builder()
+            .host("127.0.0.1")
+            .port(28000)
+            .init_database("test")
+            .storage_engine(StorageEngine::EphemeralForTest)
+            .build();
+
+        assert_eq!(mongo_options.uri(), "mongodb://127.0.0.1:28000/test".to_string())
     }
 }
