@@ -48,7 +48,9 @@ use mongo_memory_server::server::{MongoServer, MongoOptions};
 use test_context::{test_context, AsyncTestContext};
 use test_context::futures;
 
-struct MyTestContext;
+struct MyTestContext {
+	server: MongoServer,
+}
 
 #[async_trait::async_trait]
 impl AsyncTestContext for MyTestContext {
@@ -61,7 +63,9 @@ impl AsyncTestContext for MyTestContext {
         let mut server = MongoServer::new(mongo_options).unwrap();
         let _ = server.start().await.unwrap();
 
-        MyTestContext{}
+        MyTestContext{
+			server,
+		}
     }
 }
 ```

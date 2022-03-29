@@ -1,3 +1,4 @@
+use crate::download::{BinaryDownload, MongoBinary};
 use crate::error::MemoryServerError;
 
 use std::io::{BufRead, BufReader};
@@ -8,7 +9,6 @@ use std::thread;
 use regex::Regex;
 use semver::Version;
 use tempfile::TempDir;
-use crate::download::{BinaryDownload, MongoBinary};
 
 /// This version constant should correspond to the latest stable version of `MongoDB`
 const DEFAULT_MONGODB_VERSION: &str = "5.2.0";
@@ -34,18 +34,18 @@ impl From<StorageEngine> for String {
 }
 
 /// Settings that are passed on to the `mongod` process.
-pub struct MongoOptions<'a> {
-    host: &'a str,
+pub struct MongoOptions {
+    host: String,
     port: u16,
-    init_database: &'a str,
+    init_database: String,
     storage_engine: StorageEngine,
     download_dir: PathBuf,
     version: Version,
 }
 
-impl<'a> MongoOptions<'a> {
+impl MongoOptions {
     /// Returns an option builder
-    pub fn builder() -> MongoOptionsBuilder<'a> {
+    pub fn builder() -> MongoOptionsBuilder {
         MongoOptionsBuilder {
             options: Default::default(),
         }
@@ -57,16 +57,16 @@ impl<'a> MongoOptions<'a> {
     }
 }
 
-impl<'a> Default for MongoOptions<'a> {
+impl Default for MongoOptions {
     fn default() -> Self {
         let cargo_home = std::env::var("CARGO_HOME").unwrap();
         let download_dir = Path::new(&cargo_home).join("mongo-memory-server");
         let version = Version::parse(DEFAULT_MONGODB_VERSION).unwrap();
 
         Self {
-            host: "0.0.0.0",
+            host: "0.0.0.0".to_string(),
             port: 27777,
-            init_database: "test",
+            init_database: "test".to_string(),
             storage_engine: StorageEngine::EphemeralForTest,
             download_dir,
             version,
@@ -75,13 +75,13 @@ impl<'a> Default for MongoOptions<'a> {
 }
 
 /// A builder for `MongoOptions`.
-pub struct MongoOptionsBuilder<'a> {
-    options: MongoOptions<'a>,
+pub struct MongoOptionsBuilder {
+    options: MongoOptions,
 }
 
-impl<'a> MongoOptionsBuilder<'a> {
-    pub fn host(mut self, host: &'a str) -> Self {
-        self.options.host = host;
+impl MongoOptionsBuilder {
+    pub fn host<S: Into<String>>(mut self, host: S) -> Self {
+        self.options.host = host.into();
         self
     }
 
@@ -90,8 +90,8 @@ impl<'a> MongoOptionsBuilder<'a> {
         self
     }
 
-    pub fn init_database(mut self, init_database: &'a str) -> Self {
-        self.options.init_database = init_database;
+    pub fn init_database<S: Into<String>>(mut self, init_database: S) -> Self {
+        self.options.init_database = init_database.into();
         self
     }
 
@@ -100,19 +100,19 @@ impl<'a> MongoOptionsBuilder<'a> {
         self
     }
 
-    pub fn download_dir<P: AsRef<Path> + 'a>(mut self, download_dir: &'a P) -> Self {
+    pub fn download_dir<P: AsRef<Path>>(mut self, download_dir: &P) -> Self {
         self.options.download_dir = download_dir.as_ref().to_path_buf();
         self
     }
 
-    pub fn build(self) -> MongoOptions<'a> {
+    pub fn build(self) -> MongoOptions {
         self.options
     }
 }
 
 /// A struct representing a `MongoDB` memory server
-pub struct MongoServer<'a> {
-    options: MongoOptions<'a>,
+pub struct MongoServer {
+    options: MongoOptions,
     binary: MongoBinary,
     arch: String,
     data_dir: TempDir,
@@ -120,13 +120,13 @@ pub struct MongoServer<'a> {
     status: Arc<Mutex<MongoServerStatus>>,
 }
 
-impl<'a> MongoServer<'a> {
+impl MongoServer {
     /// Creates a new `MongoDB` memory server in the background
     ///
     /// # Arguments
     ///
     /// * `options` - The options used to start the instance
-    pub fn new(options: MongoOptions<'a>) -> Result<Self, MemoryServerError> {
+    pub fn new(options: MongoOptions) -> Result<Self, MemoryServerError> {
         let os_info = os_info::get();
         let arch = env!("TARGET_ARCH").to_string();
 
@@ -181,7 +181,7 @@ impl<'a> MongoServer<'a> {
             .arg("--storageEngine")
             .arg(String::from(self.options.storage_engine).as_str())
             .arg("--bind_ip")
-            .arg(self.options.host)
+            .arg(&self.options.host)
             .arg("--port")
             .arg(self.options.port.to_string().as_str())
             .arg("--noauth")

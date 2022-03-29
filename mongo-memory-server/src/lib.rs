@@ -16,9 +16,9 @@
 //! * Supported architectures: `ia32`, `x86_64`, `arm64`, `aarch64`
 //! * If you work on `unix`-like operating systems. Make sure, `libssl` is installed. Otherwise,
 //! the `MongoDB` binaries could not extracted.
-//! 	```bash
-//! 	$ apt install -y libssl-dev
-//! 	```
+//!     ```bash
+//!     $ apt install -y libssl-dev
+//!     ```
 //!
 //! # Example
 //!
