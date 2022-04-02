@@ -209,6 +209,19 @@ impl MongoServer {
         Ok(())
     }
 
+    /// Stops the server by killing the child process
+    pub fn stop(&mut self) -> Result<(), MemoryServerError> {
+        if let Some(child) = self.child.as_mut() {
+            child.kill()?;
+            self.child = None;
+        }
+
+        let mut status = self.status.lock().unwrap();
+        *status = MongoServerStatus::Stopped;
+
+        Ok(())
+    }
+
     /// Returns `true` if a `MongoDB` memory server is running in the background
     pub fn is_running(&self) -> bool {
         let status = self.status.lock().unwrap();
@@ -218,6 +231,12 @@ impl MongoServer {
     /// Returns the uri described in https://www.mongodb.com/docs/manual/reference/connection-string/
     pub fn uri(&self) -> String {
         self.options.uri()
+    }
+}
+
+impl Drop for MongoServer {
+    fn drop(&mut self) {
+        let _ = self.stop();
     }
 }
 
