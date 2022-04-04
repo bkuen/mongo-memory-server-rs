@@ -185,6 +185,7 @@ impl MongoServer {
             .arg("--port")
             .arg(self.options.port.to_string().as_str())
             .arg("--noauth")
+            .arg("--journal")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
