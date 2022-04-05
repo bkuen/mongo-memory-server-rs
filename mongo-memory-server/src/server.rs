@@ -23,12 +23,14 @@ pub enum MongoServerStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StorageEngine {
     EphemeralForTest,
+    WiredTiger,
 }
 
 impl From<StorageEngine> for String {
     fn from(engine: StorageEngine) -> Self {
         match engine {
             StorageEngine::EphemeralForTest => "ephemeralForTest".to_string(),
+            StorageEngine::WiredTiger => "wiredTiger".to_string(),
         }
     }
 }
