@@ -132,6 +132,8 @@ impl MongoServer {
         let os_info = os_info::get();
         let arch = env!("TARGET_ARCH").to_string();
 
+        println!("{:?}", os_info);
+
         let binary = MongoBinary::new(os_info, options.version.clone(), arch.clone()).unwrap();
 
         Ok(Self {

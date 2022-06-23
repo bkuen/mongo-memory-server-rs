@@ -15,7 +15,7 @@ use semver::{Version, VersionReq};
 const BINARY_URL: &str = "https://fastdl.mongodb.org";
 
 /// This version constant should correspond to the latest LTS version of `Ubuntu`
-const CURRENT_UBUNTU_LTS_VERSION: &str = "20.04";
+const CURRENT_UBUNTU_LTS_VERSION: &str = "22.04";
 
 /// A struct representing a `MongoDB` binary
 pub struct MongoBinary {
@@ -61,6 +61,7 @@ impl MongoBinary {
             OsType::Windows => Ok(self.win_archive_name()),
             OsType::Debian |
             OsType::Ubuntu |
+            OsType::Pop |
             OsType::Mint => Ok(self.linux_archive_name()),
             _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
@@ -70,7 +71,7 @@ impl MongoBinary {
     pub fn archive_file_ending(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
             OsType::Windows => Ok("zip".to_string()),
-            OsType::Debian | OsType::Ubuntu => Ok("tgz".to_string()),
+            OsType::Debian | OsType::Ubuntu | OsType::Pop => Ok("tgz".to_string()),
             _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
     }
@@ -117,7 +118,7 @@ impl MongoBinary {
         match self.os_info.os_type() {
             OsType::Debian => self.linux_debian_os_string()
                 .map(|os_string| (os_string, self.arch.clone())),
-            OsType::Ubuntu | OsType::Mint => self.linux_ubuntu_os_string(),
+            OsType::Ubuntu | OsType::Mint | OsType::Pop => self.linux_ubuntu_os_string(),
             _ => unreachable!()
         }
     }
@@ -151,7 +152,7 @@ impl MongoBinary {
         let os_info = &self.os_info;
         let os_version = self.os_info.version();
         let ubuntu_os = match os_info.os_type() {
-            OsType::Ubuntu => {
+            OsType::Ubuntu | OsType::Pop => {
                 if let os_info::Version::Rolling(Some(version)) = os_version {
                     version
                 } else {
@@ -165,6 +166,7 @@ impl MongoBinary {
                         "18" => "16.04",
                         "19" => "18.04",
                         "20" => "20.04",
+                        "22" => "22.04",
                         _ => CURRENT_UBUNTU_LTS_VERSION
                     }
                 } else {
@@ -259,7 +261,7 @@ impl MongoBinary {
                     Ok("win32")
                 }
             },
-            OsType::Debian | OsType::Ubuntu => Ok("linux"),
+            OsType::Debian | OsType::Ubuntu | OsType::Pop => Ok("linux"),
             _ => Err(MemoryServerError::UnsupportedOs(platform.to_string()))
         }.map(|s| s.to_string())
     }
@@ -594,6 +596,7 @@ mod tests {
         assert_eq!(MongoBinary::translate_platform(OsType::Windows, &mongo_version_win32).unwrap(), "win32".to_string());
         assert_eq!(MongoBinary::translate_platform(OsType::Debian, &mongo_version).unwrap(), "linux".to_string());
         assert_eq!(MongoBinary::translate_platform(OsType::Ubuntu, &mongo_version).unwrap(), "linux".to_string());
+        assert_eq!(MongoBinary::translate_platform(OsType::Pop, &mongo_version).unwrap(), "linux".to_string());
     }
 
     #[test]
