@@ -8,6 +8,7 @@ use std::path::{Path};
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use futures_util::StreamExt;
+use log::warn;
 use os_info::{Info as OsInfo, Type as OsType};
 use semver::{Version, VersionReq};
 
@@ -62,6 +63,7 @@ impl MongoBinary {
             OsType::Debian |
             OsType::Ubuntu |
             OsType::Pop |
+            OsType::Fedora |
             OsType::Mint => Ok(self.linux_archive_name()),
             _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
@@ -71,7 +73,7 @@ impl MongoBinary {
     pub fn archive_file_ending(&self) -> Result<String, MemoryServerError> {
         match self.os_info.os_type() {
             OsType::Windows => Ok("zip".to_string()),
-            OsType::Debian | OsType::Ubuntu | OsType::Pop => Ok("tgz".to_string()),
+            OsType::Debian | OsType::Ubuntu | OsType::Pop | OsType::Fedora => Ok("tgz".to_string()),
             _ => Err(MemoryServerError::UnsupportedOs(self.os_info.os_type().to_string()))
         }
     }
@@ -119,6 +121,7 @@ impl MongoBinary {
             OsType::Debian => self.linux_debian_os_string()
                 .map(|os_string| (os_string, self.arch.clone())),
             OsType::Ubuntu | OsType::Mint | OsType::Pop => self.linux_ubuntu_os_string(),
+            OsType::Fedora => self.linux_fedora_os_string(),
             _ => unreachable!()
         }
     }
@@ -128,11 +131,14 @@ impl MongoBinary {
         let version = self.os_info.version();
         let version = semver::Version::parse(version.to_string().as_str()).unwrap();
 
-        let release = if semver::VersionReq::parse(">=10").unwrap().matches(&version) {
-            if semver::VersionReq::parse("<=4.2.1").unwrap().matches(&self.mongo_version) {
-                return Err(MemoryServerError::VersionIncompatible("Mongodb does not provide binaries for versions before 4.2.1 for Debian 10+ and also cannot be mapped to a previous Debian release".to_string()));
+        let release = if semver::VersionReq::parse(">=11").unwrap().matches(&version) {
+            if semver::VersionReq::parse("<=5.0.8").unwrap().matches(&self.mongo_version) {
+                warn!("debian 11 detected, but version below 5.0.8 requested, using debian 10");
+                "10"
+            } else {
+                "11"
             }
-
+        } else if semver::VersionReq::parse(">=10.0").unwrap().matches(&version) {
             "10"
         } else if semver::VersionReq::parse(">=9.0").unwrap().matches(&version) {
             "92"
@@ -223,6 +229,32 @@ impl MongoBinary {
         return Ok((format!("ubuntu{}04", ubuntu_year), arch));
     }
 
+    /// Returns the name for a `Fedora` os in a `MongoDB` understandable way
+    fn linux_fedora_os_string(&self) -> Result<(String, String), MemoryServerError> {
+        let os_version = self.os_info.version();
+        let arch = self.arch.clone();
+
+        if let os_info::Version::Semantic(fedora_version, _, _) = os_version {
+            let fedora_version = *fedora_version;
+
+            let release = if fedora_version >= 34 {
+                "80"
+            } else if fedora_version < 34 && fedora_version >= 19 {
+                "70"
+            } else if fedora_version < 19 && fedora_version >= 12 {
+                "62"
+            } else if fedora_version < 12 && fedora_version >= 6 {
+                "55"
+            } else {
+                return Err(MemoryServerError::VersionIncompatible(fedora_version.to_string()))
+            };
+
+            return Ok((format!("rhel{}", release), arch))
+        }
+
+        Err(MemoryServerError::VersionIncompatible(os_version.to_string()))
+    }
+
     /// Returns the archive name for `Windows`:
     /// - https://www.mongodb.org/dl/win32 for `MongoDB <= 4.2.x`
     /// - https://www.mongodb.org/dl/windows for `MongoDB >= 4.3.0`
@@ -261,7 +293,7 @@ impl MongoBinary {
                     Ok("win32")
                 }
             },
-            OsType::Debian | OsType::Ubuntu | OsType::Pop => Ok("linux"),
+            OsType::Debian | OsType::Ubuntu | OsType::Pop | OsType::Fedora => Ok("linux"),
             _ => Err(MemoryServerError::UnsupportedOs(platform.to_string()))
         }.map(|s| s.to_string())
     }
@@ -531,6 +563,7 @@ mod tests {
     use std::io::Write;
 
     use os_info::{Bitness, Type as OsType, Version as OsVersion};
+    use rstest::rstest;
     use semver::Version;
     use serde::Serialize;
     use tempfile::TempDir;
@@ -574,6 +607,19 @@ mod tests {
         };
 
         let arch = "arm64".to_string();
+        (os_info, arch)
+    }
+
+    fn create_linux_fedora_os() -> (OsInfo, String) {
+        let os_info = OsInfo {
+            os_type: OsType::Fedora,
+            version: OsVersion::Semantic(37, 0, 0),
+            edition: None,
+            codename: None,
+            bitness: Bitness::X64,
+        };
+
+        let arch = "x86_64".to_string();
         (os_info, arch)
     }
 
@@ -659,6 +705,26 @@ mod tests {
         let archive = mongo_binary.win_archive_name();
 
         assert_eq!(archive, "mongodb-win32-x86_64-2008plus-ssl-3.4.0".to_string());
+    }
+
+    #[rstest]
+    #[case(37, "mongodb-linux-x86_64-rhel80-5.2.0")]
+    #[case(34, "mongodb-linux-x86_64-rhel80-5.2.0")]
+    #[case(33, "mongodb-linux-x86_64-rhel70-5.2.0")]
+    #[case(19, "mongodb-linux-x86_64-rhel70-5.2.0")]
+    #[case(18, "mongodb-linux-x86_64-rhel62-5.2.0")]
+    #[case(12, "mongodb-linux-x86_64-rhel62-5.2.0")]
+    #[case(11, "mongodb-linux-x86_64-rhel55-5.2.0")]
+    #[case(6, "mongodb-linux-x86_64-rhel55-5.2.0")]
+    fn test_binary_linux_fedora_archive_name(#[case] version: u64, #[case] expected: &str) {
+        let mongo_version = Version::parse("5.2.0").unwrap();
+        let (mut os_info, arch) = create_linux_fedora_os();
+        os_info.version = OsVersion::Semantic(version, 0, 0);
+
+        let mongo_binary = MongoBinary::new(os_info::Info::from(os_info), mongo_version.clone(), arch.clone()).unwrap();
+        let archive = mongo_binary.linux_archive_name();
+
+        assert_eq!(archive, expected.to_string());
     }
 
     #[test]
