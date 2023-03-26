@@ -127,7 +127,8 @@ mod tests {
     #[test_context(BinaryContext)]
     #[tokio::test]
     async fn test_server_stop(ctx: &mut BinaryContext) {
-        let mut server = MongoServer::new(MongoOptions::default()).unwrap();
+        let options = MongoOptions::builder().port(27778).build();
+        let mut server = MongoServer::new(options).unwrap();
         assert!(server.start().await.is_ok());
         assert!(server.stop().is_ok());
 

@@ -17,9 +17,11 @@ async fn main() -> io::Result<()> {
     info!("{:?}", info);
 
     let mut server = MongoServer::new(MongoOptions::default()).unwrap();
-    let _ = server.start().await.unwrap();
+    server.start().await.unwrap();
 
     info!("mongo memory server is ready");
+
+    server.stop().unwrap();
 
     std::thread::sleep(Duration::from_secs(60*60));
 

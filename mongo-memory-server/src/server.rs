@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use log::{debug, error};
 use regex::Regex;
 use semver::Version;
 use tempfile::TempDir;
@@ -152,8 +153,8 @@ impl MongoServer {
         let download_dir = &options.download_dir;
         let working_dir = download_dir.join(self.binary.archive_name()?).join("bin");
 
-        println!("Download directory: {:?}", download_dir);
-        println!("Working directory: {:?}", working_dir);
+        debug!("download directory: {:?}", download_dir);
+        debug!("working directory: {:?}", working_dir);
 
         let mongo_version = options.version.clone();
 
@@ -179,6 +180,11 @@ impl MongoServer {
         #[cfg(target_family = "unix")]
         let service_binary_path = working_dir.join("mongod");
 
+        {
+            let mut status = self.status.lock().unwrap();
+            *status = MongoServerStatus::Starting;
+        }
+
         let mut child = std::process::Command::new(service_binary_path)
             .arg("--dbpath")
             .arg(data_dir)
@@ -194,11 +200,6 @@ impl MongoServer {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
-
-        {
-            let mut status = self.status.lock().unwrap();
-            *status = MongoServerStatus::Starting;
-        }
 
         listen_on_events(&mut child, self.status.clone());
 
@@ -247,15 +248,25 @@ impl Drop for MongoServer {
 
 fn listen_on_events(child: &mut Child, status: Arc<Mutex<MongoServerStatus>>) {
     let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
 
     thread::spawn(move || {
-        let mut stdout_reader = BufReader::new(stdout);
+        let stdout_reader = BufReader::new(stdout);
 
-        loop {
-            let mut stdout_buf = String::new();
+        for result in stdout_reader.lines() {
+            match result {
+                Ok(line) => stdout_handler(line, status.clone()),
+                Err(_) => unreachable!(),
+            }
+        }
+    });
 
-            match stdout_reader.read_line(&mut stdout_buf) {
-                Ok(_) => stdout_handler(stdout_buf, status.clone()),
+    thread::spawn(move || {
+        let stderr_reader = BufReader::new(stderr);
+
+        for result in stderr_reader.lines() {
+            match result {
+                Ok(line) => stderr_handler(line),
                 Err(_) => unreachable!(),
             }
         }
@@ -270,10 +281,20 @@ lazy_static::lazy_static! {
 fn stdout_handler(buf: String, status: Arc<Mutex<MongoServerStatus>>) {
     let buf_str = buf.as_str();
 
-    let mut status = status.lock().unwrap();
+    if !buf.is_empty() {
+        debug!("mongo server: {}", buf_str);
 
-    if RE_READY.is_match(buf_str) {
-        *status = MongoServerStatus::Ready;
+        let mut status = status.lock().unwrap();
+
+        if RE_READY.is_match(buf_str) {
+            *status = MongoServerStatus::Ready;
+        }
+    }
+}
+
+fn stderr_handler(buf: String) {
+    if !buf.is_empty() {
+        error!("mongo server error: {}", buf);
     }
 }
 

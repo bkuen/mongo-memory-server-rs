@@ -239,11 +239,11 @@ impl MongoBinary {
 
             let release = if fedora_version >= 34 {
                 "80"
-            } else if fedora_version < 34 && fedora_version >= 19 {
+            } else if (19..34).contains(&fedora_version) {
                 "70"
-            } else if fedora_version < 19 && fedora_version >= 12 {
+            } else if (12..19).contains(&fedora_version) {
                 "62"
-            } else if fedora_version < 12 && fedora_version >= 6 {
+            } else if (6..12).contains(&fedora_version) {
                 "55"
             } else {
                 return Err(MemoryServerError::VersionIncompatible(fedora_version.to_string()))
@@ -474,7 +474,7 @@ impl BinaryDownload {
                 println!("--> Entry: {:?}", &entry_path);
 
                 let dest_path = parent_dir.join(&entry_path);
-                fs::create_dir_all(&dest_path.parent().unwrap())?;
+                fs::create_dir_all(dest_path.parent().unwrap())?;
 
                 println!("--> {:?}", &dest_path);
 
@@ -643,6 +643,7 @@ mod tests {
         assert_eq!(MongoBinary::translate_platform(OsType::Debian, &mongo_version).unwrap(), "linux".to_string());
         assert_eq!(MongoBinary::translate_platform(OsType::Ubuntu, &mongo_version).unwrap(), "linux".to_string());
         assert_eq!(MongoBinary::translate_platform(OsType::Pop, &mongo_version).unwrap(), "linux".to_string());
+        assert_eq!(MongoBinary::translate_platform(OsType::Fedora, &mongo_version).unwrap(), "linux".to_string());
     }
 
     #[test]

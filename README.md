@@ -21,7 +21,7 @@ Make sure to have a stable internet connection because a failed download might e
 ## Requirements
 
 To use this crate, make sure the following requirements are fulfilled:
-* Supported operating systems: `Windows`, `Debian`, `Ubuntu`, `Mint (not tested)`
+* Supported operating systems: `Windows`, `Debian`, `Ubuntu`, `Mint (not tested)`, `Fedora`
 * Supported architectures: `ia32`, `x86_64`, `arm64`, `aarch64`
 * If you work on `unix`-like operating systems. Make sure, `libssl` is installed. Otherwise,
 the `MongoDB` binaries could not extracted.
