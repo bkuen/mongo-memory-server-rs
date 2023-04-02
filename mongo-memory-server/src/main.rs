@@ -21,7 +21,7 @@ async fn main() -> io::Result<()> {
 
     info!("mongo memory server is ready");
 
-    server.stop().unwrap();
+    // server.stop().unwrap();
 
     std::thread::sleep(Duration::from_secs(60*60));
 

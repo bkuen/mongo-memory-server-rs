@@ -93,6 +93,11 @@ impl MongoOptionsBuilder {
         self
     }
 
+    pub fn version(mut self, version: &str) -> Self {
+        self.options.version = Version::parse(version).unwrap();
+        self
+    }
+
     pub fn init_database<S: Into<String>>(mut self, init_database: S) -> Self {
         self.options.init_database = init_database.into();
         self
